@@ -1,4 +1,3 @@
-
 const Ganache = require('./helpers/ganache');
 const deployUniswap = require('./helpers/deployUniswap');
 const { expectEvent, expectRevert, constants } = require("@openzeppelin/test-helpers");
@@ -148,9 +147,72 @@ contract('Accelerator vault', function(accounts) {
 
       assert.equal(ethHodler, NEW_HODLER);
     });
+
+    it('should not set ETH fee to transfer to HodlerVault from non-owner', async () => {
+      await expectRevert(
+        acceleratorVault.setEthFeeToHodler({ from: NOT_OWNER }),
+        'Ownable: caller is not the owner'
+      );
+    });
+
+    it('should set ETH fee to transfer to HodlerVault', async () => {
+      assert.isFalse(await acceleratorVault.ethFeeTransferEnabled());
+      await acceleratorVault.setEthFeeToHodler();
+      assert.isTrue(await acceleratorVault.ethFeeTransferEnabled());
+    });
+
+    it('should not set ETH fee to swap (buy pressure) from non-owner', async () => {
+      await expectRevert(
+        acceleratorVault.setBuyPressure({ from: NOT_OWNER }),
+        'Ownable: caller is not the owner'
+      );
+    });
+
+    it('should set ETH fee to swap (buy pressure)', async () => {
+      await acceleratorVault.setBuyPressure();
+      assert.isFalse(await acceleratorVault.ethFeeTransferEnabled());
+    });
   });
 
-  describe('PurchaseLP tests', async () => {
+  describe('Purchase LP with swapping ETH fee for tokens (buy pressure) tests', async () => {
+    it('should purchase LP for 1 ETH', async () => {
+      const liquidityTokensAmount = bn('100000').mul(baseUnit); // 100.000 tokens
+      const liquidityEtherAmount = bn('10').mul(baseUnit); // 10 ETH
+      const transferToAccelerator = bn('20000').mul(baseUnit); // 20.000 tokens
+      const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
+
+      await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
+      await uniswapRouter.addLiquidityETH(
+        ubaToken.address,
+        liquidityTokensAmount,
+        0,
+        0,
+        NOT_OWNER,
+        new Date().getTime() + 3000,
+        {value: liquidityEtherAmount}
+      );
+
+      await ubaToken.transfer(acceleratorVault.address, transferToAccelerator);
+      const vaultBalance = await ubaToken.balanceOf(acceleratorVault.address);
+      assertBNequal(vaultBalance, transferToAccelerator);
+
+      // make sure buy pressure (swap) is on
+      assert.isFalse(await acceleratorVault.ethFeeTransferEnabled());
+      
+      const estimatedFeeAmount = (purchaseValue * purchaseFee) / 100;
+      const purchaseLP = await acceleratorVault.purchaseLP({ value: purchaseValue });
+
+      expectEvent(purchaseLP, 'EthFeeSwapped', {
+        swappedAmount: estimatedFeeAmount.toString(),
+        token0: weth.address,
+        token1: ubaToken.address,
+        receiver: acceleratorVault.address,
+        ethFeeTransferEnabled: false
+      });
+    });
+  });
+
+  describe('Purchase LP with transferring ETH fee to HodlerVault tests', async () => {
     it('should not purchase LP with 0 ETH', async () => {
       await expectRevert(
         acceleratorVault.purchaseLP(),
@@ -162,6 +224,8 @@ contract('Accelerator vault', function(accounts) {
       const liquidityTokensAmount = bn('10000').mul(baseUnit); // 10.000 tokens
       const liquidityEtherAmount = bn('5').mul(baseUnit); // 5 ETH
       const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
+
+      await acceleratorVault.setEthFeeToHodler();
 
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
@@ -186,6 +250,7 @@ contract('Accelerator vault', function(accounts) {
       const transferToAccelerator = bn('20000').mul(baseUnit); // 20.000 tokens
       const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
 
+      await acceleratorVault.setEthFeeToHodler();
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
         ubaToken.address,
@@ -207,13 +272,13 @@ contract('Accelerator vault', function(accounts) {
       assertBNequal(lockedLpLength, 1);
 
       const lockedLP = await acceleratorVault.getLockedLP(OWNER, 0);
-      const { amount, timestamp } = purchaseLP.logs[0].args;
+      const { amount, timestamp } = purchaseLP.logs[1].args;
       assert.equal(lockedLP[0], OWNER);
       assertBNequal(lockedLP[1], amount);
       assertBNequal(lockedLP[2], timestamp);
 
       const { ethHodler } = await acceleratorVault.config();
-      const { to, percentageAmount } = purchaseLP.logs[1].args;
+      const { to, percentageAmount } = purchaseLP.logs[2].args;
       const estimatedHodlerAmount = (purchaseValue * purchaseFee) / 100;
       const hodlerBalanceAfter = bn(await web3.eth.getBalance(HODLER_VAULT_FAKE));
       
@@ -230,6 +295,7 @@ contract('Accelerator vault', function(accounts) {
       const transferToAccelerator = bn('200').mul(baseUnit); // 200 tokens
       const purchaseValue = bn('10').mul(baseUnit); // 1 ETH
 
+      await acceleratorVault.setEthFeeToHodler();
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
         ubaToken.address,
@@ -266,6 +332,7 @@ contract('Accelerator vault', function(accounts) {
       const transferToAccelerator = bn('20000').mul(baseUnit); // 20.000 tokens
       const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
 
+      await acceleratorVault.setEthFeeToHodler();
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
         ubaToken.address,
@@ -293,6 +360,7 @@ contract('Accelerator vault', function(accounts) {
       const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
       const pair = await IUniswapV2Pair.at(uniswapPair);
 
+      await acceleratorVault.setEthFeeToHodler();
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
         ubaToken.address,
@@ -332,6 +400,7 @@ contract('Accelerator vault', function(accounts) {
       const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
       const pair = await IUniswapV2Pair.at(uniswapPair);
 
+      await acceleratorVault.setEthFeeToHodler();
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
         ubaToken.address,
@@ -399,6 +468,7 @@ contract('Accelerator vault', function(accounts) {
       const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
       const pair = await IUniswapV2Pair.at(uniswapPair);
 
+      await acceleratorVault.setEthFeeToHodler();
       await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
       await uniswapRouter.addLiquidityETH(
         ubaToken.address,

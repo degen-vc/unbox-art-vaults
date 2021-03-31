@@ -16,6 +16,21 @@ contract AcceleratorVault is Ownable {
         uint percentageAmount
     );
 
+    /** Emitted when purchaseLP() is called to track ETH fee swap */
+    event EthFeeSwapped(
+        uint swappedAmount,
+        address token0,
+        address token1,
+        address receiver,
+        bool ethFeeTransferEnabled
+    );
+
+    event EthFeeTransferred(
+        uint transferredAmount,
+        address destination,
+        bool ethFeeTransferEnabled
+    );
+
     /** Emitted when purchaseLP() is called and LP tokens minted */
     event LPQueued(
         address holder,
@@ -53,6 +68,7 @@ contract AcceleratorVault is Ownable {
         uint8 purchaseFee; //0-100
     }
 
+    bool public ethFeeTransferEnabled;
     bool public forceUnlock;
     bool private locked;
 
@@ -99,6 +115,14 @@ contract AcceleratorVault is Ownable {
     // Could not be canceled if activated
     function enableLPForceUnlock() public onlyOwner {
         forceUnlock = true;
+    }
+
+    function setEthFeeToHodler() public onlyOwner {
+        ethFeeTransferEnabled = true;
+    }
+
+    function setBuyPressure() public onlyOwner {
+        ethFeeTransferEnabled = false;
     }
 
     function setEthHodlerAddress(address payable ethHodler) public onlyOwner {
@@ -165,11 +189,30 @@ contract AcceleratorVault is Ownable {
             tokenPairAddress,
             ubaRequired
         );
-        //ETH receiver is hodler vault here
-        config.ethHodler.transfer(feeValue);
+
         config.uniswapOracle.update();
 
         uint liquidityCreated = config.tokenPair.mint(address(this));
+
+        if(!ethFeeTransferEnabled) {
+            address[] memory path = new address[](2);
+            path[0] = address(config.weth);
+            path[1] = address(config.ubaToken);
+
+            config.uniswapRouter.swapExactETHForTokens{ value: feeValue }(
+                0,
+                path,
+                address(this),
+                block.timestamp
+            );
+
+            emit EthFeeSwapped(feeValue, path[0], path[1], address(this), ethFeeTransferEnabled);
+        } else {
+            //ETH receiver is hodler vault here
+            config.ethHodler.transfer(feeValue);
+
+            emit EthFeeTransferred(feeValue, config.ethHodler, ethFeeTransferEnabled);
+        }
 
         lockedLP[beneficiary].push(
             LPbatch({
