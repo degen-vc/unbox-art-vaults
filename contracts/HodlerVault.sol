@@ -203,7 +203,6 @@ contract HodlerVault is Ownable {
         uint liquidityCreated = config.tokenPair.mint(address(this));
 
         if (ubaFee > 0 && config.feeReceiver != address(0)) {
-            // should be approved once via approveOnUni
             config.ubaToken.transferFrom(
                 msg.sender,
                 address(this),
