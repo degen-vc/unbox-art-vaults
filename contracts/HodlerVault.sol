@@ -5,8 +5,10 @@ import "./facades/IERC20.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IWETH.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import '@openzeppelin/contracts/math/SafeMath.sol';
 
 contract HodlerVault is Ownable {
+    using SafeMath for uint;
 
     /** Emitted when purchaseLP() is called and LP tokens minted */
     event LPQueued(
@@ -36,8 +38,10 @@ contract HodlerVault is Ownable {
         IUniswapV2Router02 uniswapRouter;
         IUniswapV2Pair tokenPair;
         address weth;
+        address payable feeReceiver;
         uint32 stakeDuration;
         uint8 donationShare; //0-100
+        uint8 purchaseFee; //0-100
     }
 
     bool private locked;
@@ -111,16 +115,19 @@ contract HodlerVault is Ownable {
         uint32 duration,
         IERC20 ubaToken,
         address uniswapPair,
-        address uniswapRouter
+        address uniswapRouter,
+        address payable feeReceiver,
+        uint8 purchaseFee // UBA
     ) public onlyOwner {
         config.ubaToken = ubaToken;
         config.uniswapRouter = IUniswapV2Router02(uniswapRouter);
         config.tokenPair = IUniswapV2Pair(uniswapPair);
         config.weth = config.uniswapRouter.WETH();
-        setParameters(duration, 0);
+        setParameters(duration, 0, purchaseFee);
+        setFeeReceiver(feeReceiver);
     }
 
-    function setParameters(uint32 duration, uint8 donationShare)
+    function setParameters(uint32 duration, uint8 donationShare, uint8 purchaseFee)
         public
         onlyOwner
     {
@@ -128,9 +135,28 @@ contract HodlerVault is Ownable {
             donationShare <= 100,
             "HodlerVault: donation share % between 0 and 100"
         );
+        require(
+            purchaseFee <= 100,
+            "HodlerVault: purchase fee share % between 0 and 100"
+        );
 
         config.stakeDuration = duration * 1 days;
         config.donationShare = donationShare;
+        config.purchaseFee = purchaseFee;
+    }
+
+
+    function setFeeReceiver(address payable feeReceiver) public onlyOwner {
+        require(
+            feeReceiver != address(0),
+            "HodlerVault: fee receiver is zero address"
+        );
+
+        config.feeReceiver = feeReceiver;
+    }
+
+    function approveOnUni() public {
+        config.ubaToken.approve(address(config.uniswapRouter), uint(-1));
     }
 
 
@@ -139,19 +165,22 @@ contract HodlerVault is Ownable {
         require(config.ubaToken.balanceOf(msg.sender) >= amount, "HodlerVault: Not enough UBA tokens");
         require(config.ubaToken.allowance(msg.sender, address(this)) >= amount, "HodlerVault: Not enough UBA tokens allowance");
 
+        uint ubaFee = amount.mul(config.purchaseFee).div(100);
+        uint netUba = amount.sub(ubaFee);
+
         (uint reserve1, uint reserve2, ) = config.tokenPair.getReserves();
 
         uint ethRequired;
 
         if (address(config.ubaToken) > address(config.weth)) {
             ethRequired = config.uniswapRouter.quote(
-                amount,
+                netUba,
                 reserve2,
                 reserve1
             );
         } else {
             ethRequired = config.uniswapRouter.quote(
-                amount,
+                netUba,
                 reserve1,
                 reserve2
             );
@@ -168,10 +197,31 @@ contract HodlerVault is Ownable {
         config.ubaToken.transferFrom(
             msg.sender,
             tokenPairAddress,
-            amount
+            netUba
         );
 
         uint liquidityCreated = config.tokenPair.mint(address(this));
+
+        if (ubaFee > 0 && config.feeReceiver != address(0)) {
+            // should be approved once via approveOnUni
+            config.ubaToken.transferFrom(
+                msg.sender,
+                address(this),
+                ubaFee
+            );
+
+            address[] memory path = new address[](2);
+            path[0] = address(config.ubaToken);
+            path[1] = address(config.weth);
+
+            config.uniswapRouter.swapExactTokensForETH(
+                ubaFee,
+                0,
+                path,
+                config.feeReceiver,
+                block.timestamp
+            );
+        }
 
         lockedLP[msg.sender].push(
             LPbatch({
@@ -185,7 +235,7 @@ contract HodlerVault is Ownable {
             msg.sender,
             liquidityCreated,
             ethRequired,
-            amount,
+            netUba,
             block.timestamp
         );
 
