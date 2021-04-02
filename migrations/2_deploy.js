@@ -38,7 +38,7 @@ module.exports = async (deployer, network, accounts) => {
   pausePromise('HodlerVault');
 
   if (network === 'kovan') {
-    await deployer.deploy(UBAToken, accounts[0]);
+    await deployer.deploy(UBAToken);
     const ubaToken = await UBAToken.deployed();
     pausePromise('UBAToken');
 
@@ -59,7 +59,7 @@ module.exports = async (deployer, network, accounts) => {
       hodlerVault.address,
       donationShare,
       purchaseFee,
-      oracle
+      oracle.address
     );
 
     await hodlerVault.seed(
