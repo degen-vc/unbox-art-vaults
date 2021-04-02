@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const AcceleratorVault = artifacts.require('AcceleratorVault');
+const HodlerVault = artifacts.require('HodlerVault');
 const UBAToken = artifacts.require('UnboxArtToken');
 const PriceOracle = artifacts.require('PriceOracle');
 const UniswapFactory = artifacts.require('UniswapFactory');
@@ -10,14 +11,19 @@ const {
   UNISWAP_ROUTER,
   WETH_KOVAN,
   UBA_TOKEN_MAINNET,
-  UNISWAP_PAIR
+  UNISWAP_PAIR,
+  HODLER_FEE_RECEIVER
 } = process.env;
 
 module.exports = async (deployer, network, accounts) => {
-  const hodlerVaultPlaceholder = accounts[3];
   const stakeDuration = 4;
   const donationShare = 0;
   const purchaseFee = 10;
+
+  const hodlerStakeDuration = 15;
+  const hodlerPurchaseFee = 10;
+
+
 
   if (network === 'development') {
     return;
@@ -26,6 +32,10 @@ module.exports = async (deployer, network, accounts) => {
   await deployer.deploy(AcceleratorVault);
   const acceleratorVault = await AcceleratorVault.deployed();
   pausePromise('AcceleratorVault');
+
+  await deployer.deploy(HodlerVault);
+  const hodlerVault = await HodlerVault.deployed();
+  pausePromise('HodlerVault');
 
   if (network === 'kovan') {
     await deployer.deploy(UBAToken, accounts[0]);
@@ -40,26 +50,34 @@ module.exports = async (deployer, network, accounts) => {
     await deployer.deploy(PriceOracle, uniswapPair, ubaToken.address, WETH_KOVAN);
     const oracle = await PriceOracle.deployed();
     pausePromise('PriceOracle');
-    
+
     await acceleratorVault.seed(
-      stakeDuration, 
-      ubaToken.address, 
-      uniswapPair, 
-      UNISWAP_ROUTER, 
-      hodlerVaultPlaceholder,
+      stakeDuration,
+      ubaToken.address,
+      uniswapPair,
+      UNISWAP_ROUTER,
+      hodlerVault.address,
       donationShare,
       purchaseFee,
       oracle
     );
+
+    await hodlerVault.seed(
+      hodlerStakeDuration,
+      ubaToken.address,
+      uniswapPair,
+      UNISWAP_ROUTER,
+      HODLER_FEE_RECEIVER,
+      hodlerPurchaseFee
+    );
   }
-  
 }
 
 function pausePromise(message, durationInSeconds = 2) {
-	return new Promise(function (resolve, error) {
-		setTimeout(() => {
-			console.log(message);
-			return resolve();
-		}, durationInSeconds * 1000);
-	});
+  return new Promise(function (resolve, error) {
+    setTimeout(() => {
+      console.log(message);
+      return resolve();
+    }, durationInSeconds * 1000);
+  });
 }

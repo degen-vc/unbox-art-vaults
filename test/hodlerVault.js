@@ -2,6 +2,7 @@
 const Ganache = require('./helpers/ganache');
 const deployUniswap = require('./helpers/deployUniswap');
 const { expectEvent, expectRevert, constants } = require("@openzeppelin/test-helpers");
+const { web3 } = require('@openzeppelin/test-helpers/src/setup');
 
 const UnboxArtToken = artifacts.require('UnboxArtToken');
 const HodlerVault = artifacts.require('HodlerVault');
@@ -22,10 +23,12 @@ contract('Hodler vault', function(accounts) {
   const NOT_OWNER = accounts[1];
   const USER = accounts[2];
   const USER_2 = accounts[3];
+  const FEE_RECEIVER = '0x38786ff354b4351F41c6763fc40F7124df01082B';
   const baseUnit = bn('1000000000000000000');
   const startTime = Math.floor(Date.now() / 1000);
   const lockTime = 86400; // 1day
   const stakeDuration = 1;
+  const purchaseFee = 0; // 0%
 
   let uniswapPair;
   let uniswapFactory;
@@ -53,7 +56,9 @@ contract('Hodler vault', function(accounts) {
       stakeDuration,
       ubaToken.address,
       uniswapPair,
-      uniswapRouter.address
+      uniswapRouter.address,
+      FEE_RECEIVER,
+      purchaseFee
     );
 
     pair = await IERC20.at(uniswapPair);
@@ -111,6 +116,62 @@ contract('Hodler vault', function(accounts) {
       expectEvent(result, 'LPQueued', {
         hodler: USER,
         ubaTokens: tokensAmount.toString()
+      });
+    });
+
+    it('should be possible to purchaseLP and purchaseFee should be swapped and send to the feeReceiver', async () => {
+      const liquidityTokensAmount = bn('10000').mul(baseUnit); // 10.000 tokens
+      const liquidityEtherAmount = bn('10').mul(baseUnit); // 10 ETH
+      const ubaFee = bn(20); // 20%
+      await hodlerVault.setParameters(5, 0, ubaFee);
+
+      await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
+
+      await uniswapRouter.addLiquidityETH(
+        ubaToken.address,
+        liquidityTokensAmount,
+        0,
+        0,
+        OWNER,
+        new Date().getTime() + 3000,
+        {value: liquidityEtherAmount}
+      );
+
+      const tokensAmount = bn('500').mul(baseUnit);
+      const tokensFee = tokensAmount.mul(ubaFee).div(bn(100));
+      const tokensNet = tokensAmount.sub(tokensFee);
+
+      await ubaToken.transfer(USER, tokensAmount);
+
+      await hodlerVault.sendTransaction({value: bn('11').mul(baseUnit)})
+
+      await ubaToken.approve(hodlerVault.address, tokensAmount, {from: USER});
+
+      assertBNequal(await hodlerVault.lockedLPLength(USER), 0);
+      assertBNequal(await pair.balanceOf(hodlerVault.address), 0);
+
+      //TODO test all with fee here
+      await hodlerVault.approveOnUni();
+
+      assertBNequal(await web3.eth.getBalance(FEE_RECEIVER), 0);
+
+      const result = await hodlerVault.purchaseLP(tokensAmount, {from: USER});
+
+      const feeReceiverBalance = await web3.eth.getBalance(FEE_RECEIVER)
+      assert.isTrue(bn('98000000000000000').lt(bn(feeReceiverBalance.toString())));
+
+      const lpLocked = '12649110640673517327';
+      assertBNequal(await pair.balanceOf(hodlerVault.address), lpLocked);
+
+
+      assertBNequal(await hodlerVault.lockedLPLength(USER), 1);
+      const lockedLPObj = await hodlerVault.getLockedLP(USER, 0);
+      assertBNequal(lockedLPObj[1], lpLocked);
+
+
+      expectEvent(result, 'LPQueued', {
+        hodler: USER,
+        ubaTokens: tokensNet.toString()
       });
     });
 
@@ -619,13 +680,17 @@ contract('Hodler vault', function(accounts) {
       assert.equal(config.uniswapRouter, uniswapRouter.address);
       assert.equal(config.weth, weth.address);
       assertBNequal(config.stakeDuration, 86400);
+      assert.equal(config.feeReceiver, FEE_RECEIVER);
+      assertBNequal(config.purchaseFee, 0);
 
       const fakeAddress = accounts[6];
       await hodlerVault.seed(
         5,
         fakeAddress,
         fakeAddress,
-        uniswapRouter.address
+        uniswapRouter.address,
+        USER,
+        10
       );
 
       config = await hodlerVault.config();
@@ -634,6 +699,8 @@ contract('Hodler vault', function(accounts) {
       assert.equal(config.uniswapRouter, uniswapRouter.address);
       assert.equal(config.weth, weth.address);
       assertBNequal(config.stakeDuration, 5 * 86400);
+      assert.equal(config.feeReceiver, USER);
+      assertBNequal(config.purchaseFee, 10);
 
     });
 
@@ -645,6 +712,8 @@ contract('Hodler vault', function(accounts) {
           fakeAddress,
           fakeAddress,
           uniswapRouter.address,
+          USER,
+          10,
           {from: NOT_OWNER}
         ),
         'Ownable: caller is not the owner.'
@@ -657,18 +726,34 @@ contract('Hodler vault', function(accounts) {
       assertBNequal(config.stakeDuration, 86400);
       assertBNequal(config.donationShare, 0);
 
-      await hodlerVault.setParameters(2, 50);
+      await hodlerVault.setParameters(2, 50, 60);
 
       config = await hodlerVault.config();
       assertBNequal(config.stakeDuration, 2 * 86400);
       assertBNequal(config.donationShare, 50);
+      assertBNequal(config.purchaseFee, 60);
     });
 
     it('should NOT be possible to setDuration for NOT owner', async () => {
       await expectRevert(
-        hodlerVault.setParameters(2, 50, {from: NOT_OWNER}),
+        hodlerVault.setParameters(2, 50, 60, {from: NOT_OWNER}),
         'Ownable: caller is not the owner.'
       );
+    });
+
+    it('should not set fee receiver address from non-owner', async () => {
+      const newFeeReceiver = accounts[7];
+
+      await expectRevert(
+        hodlerVault.setFeeReceiver(newFeeReceiver, { from: NOT_OWNER }),
+        'Ownable: caller is not the owner'
+      );
+    });
+
+    it('should set fee receiver address', async () => {
+      const newFeeReceiver = accounts[7];
+      await hodlerVault.setFeeReceiver(newFeeReceiver);
+      assert.equal((await hodlerVault.config()).feeReceiver, newFeeReceiver);
     });
 
     it('should be possible to enableLPForceUnlock', async () => {
