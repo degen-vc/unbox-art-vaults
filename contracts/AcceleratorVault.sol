@@ -9,11 +9,11 @@ import "./PriceOracle.sol";
 
 contract AcceleratorVault is Ownable {
     /** Emitted when purchaseLP() is called to track ETH amounts */
-    event EthereumDeposited(
+    event EthTransferred(
         address from,
-        address to,
         uint amount,
-        uint percentageAmount
+        uint percentageAmount,
+        bool ethFeeTransferEnabled
     );
 
     /** Emitted when purchaseLP() is called and LP tokens minted */
@@ -53,6 +53,7 @@ contract AcceleratorVault is Ownable {
         uint8 purchaseFee; //0-100
     }
 
+    bool public ethFeeTransferEnabled;
     bool public forceUnlock;
     bool private locked;
 
@@ -99,6 +100,14 @@ contract AcceleratorVault is Ownable {
     // Could not be canceled if activated
     function enableLPForceUnlock() public onlyOwner {
         forceUnlock = true;
+    }
+
+    function setEthFeeToHodler() public onlyOwner {
+        ethFeeTransferEnabled = true;
+    }
+
+    function setBuyPressure() public onlyOwner {
+        ethFeeTransferEnabled = false;
     }
 
     function setEthHodlerAddress(address payable ethHodler) public onlyOwner {
@@ -165,11 +174,26 @@ contract AcceleratorVault is Ownable {
             tokenPairAddress,
             ubaRequired
         );
-        //ETH receiver is hodler vault here
-        config.ethHodler.transfer(feeValue);
+
         config.uniswapOracle.update();
 
         uint liquidityCreated = config.tokenPair.mint(address(this));
+
+        if (!ethFeeTransferEnabled) {
+            address[] memory path = new address[](2);
+            path[0] = address(config.weth);
+            path[1] = address(config.ubaToken);
+
+            config.uniswapRouter.swapExactETHForTokens{ value: feeValue }(
+                0,
+                path,
+                address(this),
+                block.timestamp
+            );
+        } else {
+            //ETH receiver is hodler vault here
+            config.ethHodler.transfer(feeValue);
+        }
 
         lockedLP[beneficiary].push(
             LPbatch({
@@ -188,7 +212,7 @@ contract AcceleratorVault is Ownable {
             block.timestamp
         );
 
-        emit EthereumDeposited(msg.sender, config.ethHodler, exchangeValue, feeValue);
+        emit EthTransferred(msg.sender, exchangeValue, feeValue, ethFeeTransferEnabled);
     }
 
     //send eth to match with UBA tokens in AcceleratorVault
