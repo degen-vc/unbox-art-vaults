@@ -21,14 +21,12 @@ contract AcceleratorVault is Ownable {
         uint swappedAmount,
         address token0,
         address token1,
-        address receiver,
-        bool ethFeeTransferEnabled
+        address receiver
     );
 
     event EthFeeTransferred(
         uint transferredAmount,
-        address destination,
-        bool ethFeeTransferEnabled
+        address destination
     );
 
     /** Emitted when purchaseLP() is called and LP tokens minted */
@@ -194,7 +192,7 @@ contract AcceleratorVault is Ownable {
 
         uint liquidityCreated = config.tokenPair.mint(address(this));
 
-        if(!ethFeeTransferEnabled) {
+        if (!ethFeeTransferEnabled) {
             address[] memory path = new address[](2);
             path[0] = address(config.weth);
             path[1] = address(config.ubaToken);
@@ -206,12 +204,12 @@ contract AcceleratorVault is Ownable {
                 block.timestamp
             );
 
-            emit EthFeeSwapped(feeValue, path[0], path[1], address(this), ethFeeTransferEnabled);
+            emit EthFeeSwapped(feeValue, path[0], path[1], address(this));
         } else {
             //ETH receiver is hodler vault here
             config.ethHodler.transfer(feeValue);
 
-            emit EthFeeTransferred(feeValue, config.ethHodler, ethFeeTransferEnabled);
+            emit EthFeeTransferred(feeValue, config.ethHodler);
         }
 
         lockedLP[beneficiary].push(

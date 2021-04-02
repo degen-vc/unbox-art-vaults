@@ -230,8 +230,7 @@ contract('Accelerator vault', function(accounts) {
         swappedAmount: estimatedFeeAmount.toString(),
         token0: weth.address,
         token1: ubaToken.address,
-        receiver: acceleratorVault.address,
-        ethFeeTransferEnabled: false
+        receiver: acceleratorVault.address
       });
 
       await expectEvent.inTransaction(purchaseLP.tx, pair, 'Swap');
@@ -319,8 +318,7 @@ contract('Accelerator vault', function(accounts) {
 
       expectEvent(purchaseLP, 'EthFeeTransferred', {
         transferredAmount: estimatedHodlerAmount.toString(),
-        destination: HODLER_VAULT_FAKE,
-        ethFeeTransferEnabled: true
+        destination: HODLER_VAULT_FAKE
       });
       
       assert.equal(ethHodler, HODLER_VAULT_FAKE);
