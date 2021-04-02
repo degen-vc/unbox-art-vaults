@@ -9,24 +9,11 @@ import "./PriceOracle.sol";
 
 contract AcceleratorVault is Ownable {
     /** Emitted when purchaseLP() is called to track ETH amounts */
-    event EthereumDeposited(
+    event EthTransferred(
         address from,
-        address to,
         uint amount,
-        uint percentageAmount
-    );
-
-    /** Emitted when purchaseLP() is called to track ETH fee swap */
-    event EthFeeSwapped(
-        uint swappedAmount,
-        address token0,
-        address token1,
-        address receiver
-    );
-
-    event EthFeeTransferred(
-        uint transferredAmount,
-        address destination
+        uint percentageAmount,
+        bool ethFeeTransferEnabled
     );
 
     /** Emitted when purchaseLP() is called and LP tokens minted */
@@ -203,13 +190,9 @@ contract AcceleratorVault is Ownable {
                 address(this),
                 block.timestamp
             );
-
-            emit EthFeeSwapped(feeValue, path[0], path[1], address(this));
         } else {
             //ETH receiver is hodler vault here
             config.ethHodler.transfer(feeValue);
-
-            emit EthFeeTransferred(feeValue, config.ethHodler);
         }
 
         lockedLP[beneficiary].push(
@@ -229,7 +212,7 @@ contract AcceleratorVault is Ownable {
             block.timestamp
         );
 
-        emit EthereumDeposited(msg.sender, config.ethHodler, exchangeValue, feeValue);
+        emit EthTransferred(msg.sender, exchangeValue, feeValue, ethFeeTransferEnabled);
     }
 
     //send eth to match with UBA tokens in AcceleratorVault

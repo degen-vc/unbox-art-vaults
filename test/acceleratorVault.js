@@ -197,6 +197,39 @@ contract('Accelerator vault', function(accounts) {
       );
     });
 
+    it('should revert if purchaseFee is 0 and buy pressure is on', async () => {
+      const liquidityTokensAmount = bn('10000').mul(baseUnit); // 10.000 tokens
+      const liquidityEtherAmount = bn('5').mul(baseUnit); // 5 ETH
+      const transferToAccelerator = bn('20000').mul(baseUnit); // 20.000 tokens
+      const purchaseValue = bn('1').mul(baseUnit); // 1 ETH
+      const pair = await IUniswapV2Pair.at(uniswapPair);
+
+      await ubaToken.approve(uniswapRouter.address, liquidityTokensAmount);
+      await uniswapRouter.addLiquidityETH(
+        ubaToken.address,
+        liquidityTokensAmount,
+        0,
+        0,
+        NOT_OWNER,
+        new Date().getTime() + 3000,
+        {value: liquidityEtherAmount}
+      );
+
+      await ubaToken.transfer(acceleratorVault.address, transferToAccelerator);
+      const vaultBalance = await ubaToken.balanceOf(acceleratorVault.address);
+      assertBNequal(vaultBalance, transferToAccelerator);
+
+      await acceleratorVault.setParameters(4, 0, 0);
+
+      // make sure buy pressure (swap) is on
+      assert.isFalse(await acceleratorVault.ethFeeTransferEnabled());
+      
+      await expectRevert(
+        acceleratorVault.purchaseLP({ value: purchaseValue }),
+        'UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT'
+      );
+    });
+
     it('should purchase LP for 1 ETH', async () => {
       const liquidityTokensAmount = bn('10000').mul(baseUnit); // 10.000 tokens
       const liquidityEtherAmount = bn('5').mul(baseUnit); // 5 ETH
@@ -222,24 +255,16 @@ contract('Accelerator vault', function(accounts) {
       // make sure buy pressure (swap) is on
       assert.isFalse(await acceleratorVault.ethFeeTransferEnabled());
       
-      const estimatedFeeAmount = (purchaseValue * purchaseFee) / 100;
       const purchaseLP = await acceleratorVault.purchaseLP({ value: purchaseValue });
-      const vaultBalanceAfter = await ubaToken.balanceOf(acceleratorVault.address);
 
-      expectEvent(purchaseLP, 'EthFeeSwapped', {
-        swappedAmount: estimatedFeeAmount.toString(),
-        token0: weth.address,
-        token1: ubaToken.address,
-        receiver: acceleratorVault.address
-      });
-
+      await expectEvent(purchaseLP, 'EthTransferred', { ethFeeTransferEnabled: false });
       await expectEvent.inTransaction(purchaseLP.tx, pair, 'Swap');
 
       const lockedLpLength = await acceleratorVault.lockedLPLength(OWNER);
       assertBNequal(lockedLpLength, 1);
 
       const lockedLP = await acceleratorVault.getLockedLP(OWNER, 0);
-      const { amount, timestamp } = purchaseLP.logs[1].args;
+      const { amount, timestamp } = purchaseLP.logs[0].args;
       assert.equal(lockedLP[0], OWNER);
       assertBNequal(lockedLP[1], amount);
       assertBNequal(lockedLP[2], timestamp);
@@ -305,24 +330,20 @@ contract('Accelerator vault', function(accounts) {
       const lockedLpLength = await acceleratorVault.lockedLPLength(OWNER);
       assertBNequal(lockedLpLength, 1);
 
+      await expectEvent(purchaseLP, 'EthTransferred', { ethFeeTransferEnabled: true });
+
       const lockedLP = await acceleratorVault.getLockedLP(OWNER, 0);
-      const { amount, timestamp } = purchaseLP.logs[1].args;
+      const { amount, timestamp } = purchaseLP.logs[0].args;
       assert.equal(lockedLP[0], OWNER);
       assertBNequal(lockedLP[1], amount);
       assertBNequal(lockedLP[2], timestamp);
 
       const { ethHodler } = await acceleratorVault.config();
-      const { to, percentageAmount } = purchaseLP.logs[2].args;
+      const { percentageAmount } = purchaseLP.logs[1].args;
       const estimatedHodlerAmount = (purchaseValue * purchaseFee) / 100;
       const hodlerBalanceAfter = bn(await web3.eth.getBalance(HODLER_VAULT_FAKE));
 
-      expectEvent(purchaseLP, 'EthFeeTransferred', {
-        transferredAmount: estimatedHodlerAmount.toString(),
-        destination: HODLER_VAULT_FAKE
-      });
-      
       assert.equal(ethHodler, HODLER_VAULT_FAKE);
-      assert.equal(ethHodler, to);
       assertBNequal(hodlerBalanceAfter.sub(hodlerBalanceBefore), estimatedHodlerAmount);
       assertBNequal(estimatedHodlerAmount, percentageAmount);
 
