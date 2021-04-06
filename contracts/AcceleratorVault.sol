@@ -5,7 +5,6 @@ import "./facades/IERC20.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IWETH.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
-import "./PriceOracle.sol";
 
 contract AcceleratorVault is Ownable {
     /** Emitted when purchaseLP() is called to track ETH amounts */
@@ -45,7 +44,6 @@ contract AcceleratorVault is Ownable {
         address ubaToken;
         IUniswapV2Router02 uniswapRouter;
         IUniswapV2Pair tokenPair;
-        PriceOracle uniswapOracle;
         address weth;
         address payable ethHodler;
         uint32 stakeDuration;
@@ -76,21 +74,14 @@ contract AcceleratorVault is Ownable {
         address uniswapRouter,
         address payable ethHodler,
         uint8 donationShare, // LP Token
-        uint8 purchaseFee, // ETH
-        PriceOracle uniswapOracle
+        uint8 purchaseFee // ETH
     ) public onlyOwner {
         config.ubaToken = ubaToken;
         config.uniswapRouter = IUniswapV2Router02(uniswapRouter);
         config.tokenPair = IUniswapV2Pair(uniswapPair);
         config.weth = config.uniswapRouter.WETH();
-        config.uniswapOracle = uniswapOracle;
         setEthHodlerAddress(ethHodler);
         setParameters(duration, donationShare, purchaseFee);
-    }
-
-    function setOracleAddress(PriceOracle _uniswapOracle) external onlyOwner {
-        require(address(_uniswapOracle) != address(0), "Zero address not allowed");
-        config.uniswapOracle = _uniswapOracle;
     }
 
     function getStakeDuration() public view returns (uint) {
@@ -174,8 +165,6 @@ contract AcceleratorVault is Ownable {
             tokenPairAddress,
             ubaRequired
         );
-
-        config.uniswapOracle.update();
 
         uint liquidityCreated = config.tokenPair.mint(address(this));
 
