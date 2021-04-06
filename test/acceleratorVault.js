@@ -6,11 +6,6 @@ const { web3 } = require('@openzeppelin/test-helpers/src/setup');
 const UnboxArtToken = artifacts.require('UnboxArtToken');
 const AcceleratorVault = artifacts.require('AcceleratorVault');
 const IUniswapV2Pair = artifacts.require('IUniswapV2Pair');
-const PriceOracle = artifacts.require('PriceOracle');
-
-const bn = (input) => web3.utils.toBN(input)
-const assertBNequal = (bnOne, bnTwo) => assert.equal(bnOne.toString(), bnTwo.toString())
-
 
 contract('Accelerator vault', function(accounts) {
   const ganache = new Ganache(web3);
@@ -28,7 +23,6 @@ contract('Accelerator vault', function(accounts) {
   const donationShare = 10;
   const purchaseFee = 10;
 
-  let uniswapOracle;
   let uniswapPair;
   let uniswapFactory;
   let uniswapRouter;
@@ -51,8 +45,6 @@ contract('Accelerator vault', function(accounts) {
     uniswapPair = await uniswapFactory.getPair.call(weth.address, ubaToken.address);
 
 
-    uniswapOracle = await PriceOracle.new(uniswapPair, ubaToken.address, weth.address);
-
     await acceleratorVault.seed(
       stakeDuration,
       ubaToken.address,
@@ -60,8 +52,7 @@ contract('Accelerator vault', function(accounts) {
       uniswapRouter.address,
       HODLER_VAULT_FAKE,
       donationShare,
-      purchaseFee,
-      uniswapOracle.address
+      purchaseFee
     );
 
     await ganache.snapshot();
@@ -75,25 +66,9 @@ contract('Accelerator vault', function(accounts) {
       assert.equal(config.uniswapRouter, uniswapRouter.address);
       assert.equal(config.ethHodler, HODLER_VAULT_FAKE);
       assert.equal(config.weth, weth.address);
-      assert.equal(config.uniswapOracle, uniswapOracle.address);
       assertBNequal(config.stakeDuration, 86400);
       assertBNequal(config.donationShare, donationShare);
       assertBNequal(config.purchaseFee, purchaseFee);
-    });
-
-    it('should not set an oracle from non-owner', async () => {
-      await expectRevert(
-        acceleratorVault.setOracleAddress(uniswapOracle.address, { from: NOT_OWNER }),
-        'Ownable: caller is not the owner'
-      );
-    });
-
-    it('should set new oracle', async () => {
-      const FAKE_ORACLE = accounts[3];
-      await acceleratorVault.setOracleAddress(FAKE_ORACLE);
-      const { uniswapOracle } = await acceleratorVault.config();
-
-      assert.equal(uniswapOracle, FAKE_ORACLE);
     });
 
     it('should not set parameters from non-owner', async () => {

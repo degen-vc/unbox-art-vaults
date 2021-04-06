@@ -3,7 +3,6 @@ require('dotenv').config();
 const AcceleratorVault = artifacts.require('AcceleratorVault');
 const HodlerVault = artifacts.require('HodlerVault');
 const UBAToken = artifacts.require('UnboxArtToken');
-const PriceOracle = artifacts.require('PriceOracle');
 const UniswapFactory = artifacts.require('UniswapFactory');
 
 const { 
@@ -47,9 +46,6 @@ module.exports = async (deployer, network, accounts) => {
     pausePromise('Create pair');
 
     uniswapPair = await uniswapFactory.getPair.call(WETH_KOVAN, ubaToken.address);
-    await deployer.deploy(PriceOracle, uniswapPair, ubaToken.address, WETH_KOVAN);
-    const oracle = await PriceOracle.deployed();
-    pausePromise('PriceOracle');
 
     await acceleratorVault.seed(
       stakeDuration,
@@ -58,8 +54,7 @@ module.exports = async (deployer, network, accounts) => {
       UNISWAP_ROUTER,
       hodlerVault.address,
       donationShare,
-      purchaseFee,
-      oracle.address
+      purchaseFee
     );
 
     await hodlerVault.seed(

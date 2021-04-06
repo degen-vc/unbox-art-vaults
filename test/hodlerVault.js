@@ -8,10 +8,6 @@ const UnboxArtToken = artifacts.require('UnboxArtToken');
 const HodlerVault = artifacts.require('HodlerVault');
 const IERC20 = artifacts.require('IERC20');
 
-const bn = (input) => web3.utils.toBN(input)
-const assertBNequal = (bnOne, bnTwo) => assert.equal(bnOne.toString(), bnTwo.toString())
-
-
 contract('Hodler vault', function(accounts) {
   const ganache = new Ganache(web3);
   afterEach('revert', ganache.revert);
